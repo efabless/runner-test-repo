@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  # Runs on all pushes to branches
+  push:
+  # Runs on all PRs
+  pull_request:
+  # Runs every day at midnight UTC
+  schedule:
+    - cron: "0 0 * * *"
+  # Manual Dispatch
+  workflow_dispatch:
+
+jobs:
+  docker_build_arm64v8:
+    name: Docker Build (arm64v8)
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - uses: docker/setup-buildx-action@v2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+
+      - name: Docker Build
+        shell: bash
+        run: |
+          docker build -t openroad_build .
+
+      - name: Export Docker Image
+        shell: bash
+        run: docker save -o /tmp/image.tar openroad_build
+
+      - name: Upload Docker Image
+        uses: actions/upload-artifact@v2
+        with:
+          name: docker-image
+          path: /tmp/image.tar
+  smoke_test:
+    name: Smoke Test
+    runs-on: ubuntu-20.04
+    needs: [docker_build_arm64v8]
+    if: always()
+    steps:
+      - name: Download Docker Image
+        uses: actions/download-artifact@v2
+        if: needs.docker_build_arm64v8.result == 'success'
+        with:
+          name: docker-image
+          path: /tmp
+      - name: Import Docker Image
+        if: needs.docker_build_arm64v8.result == 'success'
+        run: docker load --input /tmp/image.tar
+      - name: Smoke Test
+        if: needs.docker_build_arm64v8.result == 'success'
+        run: |
+          docker run --rm -ti openroad_build openroad -version
+      - name: Cleanup
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: docker-image
